@@ -1,0 +1,23 @@
+name: tfidf-vectoriser
+description: vectorising text data using scikit learn vectorisation
+
+inputs:
+- {name: data_path,  default: '',   description: Input train_data_paths,  type: str}
+- {name: vectorizer_gcs_location, type: GCSPath, description: ''}
+outputs:
+- {name: local_output, type: LocalPath, description: ''}
+- {name: MLPipeline UI metadata, type: UI metadata}
+
+
+implementation:
+  container:
+    command: ["python", "/app/src/main.py"]
+    args: [
+    --train_data_path, {inputValue: data_path}, # inputValue same as name above in inputs
+    --vectorizer_output, {inputValue: vectorizer_gcs_location}, # inputValue same as name above in inputs
+    --local_out, {outputPath: local_output}, # outputPath same as name above in outputs
+    ]
+    fileOutputs:
+      MLPipeline UI metadata: /mlpipeline-ui-metadata.json
+
+    image: gcr.io/myfirstproject-226013/sentiment_text_preprocessing/tfidf-vectoriser:latest

@@ -1,0 +1,98 @@
+steps:
+
+# -------------- TFIDF-VECTORISER --------------
+
+## Clone repo to Cloud Build environment
+#- name: 'gcr.io/cloud-builders/git'
+#  args: ['clone',
+#         'https://source.developers.google.com/p/$PROJECT_ID/r/$REPO_NAME']
+#  id: 'clone_repo'
+
+# Run unit tests and code coverage
+- name: 'python:3.6-slim-jessie'
+  entrypoint: 'bash'
+  dir: 'component/tfidf-vectoriser'
+  args: ['run_tests.sh']
+#  waitFor: ['clone_repo']
+  id: 'tests'
+
+# Create the image for the component
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/$REPO_NAME/tfidf-vectoriser:$SHORT_SHA', '-t', 'gcr.io/$PROJECT_ID/$REPO_NAME/tfidf-vectoriser:latest', '.']
+  dir: 'component/tfidf-vectoriser'
+  waitFor: ['tests']
+  id: 'BuildTFIDFImage'
+
+
+# Create the images for the utils
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/$REPO_NAME/kubectl-util:latest', '.']
+  dir: 'util/kubectl'
+#  waitFor: ['clone_repo']
+  id: 'BuildKFUtilImage'
+
+# -------------- TFIDF-VECTORISER END --------------
+
+# compile pipeline
+- name: 'python:3.5.7-slim-buster'
+  entrypoint: 'bash'
+  dir: 'pipeline'
+  args: ['pipeline_builder.sh', 'gs://$REPO_NAME/$COMMIT_SHA/pipeline.tar.gz']
+  waitFor: ['BuildTFIDFImage', 'BuildKFUtilImage']
+  id: 'CompilePipeline'
+
+# execute pipeline experiment
+- name: 'gcr.io/$PROJECT_ID/$REPO_NAME/kubectl-util:latest'
+  entrypoint: '/bin/sh'
+  args: ['-c', '/builder/kubectl.bash;
+                gsutil cp gs://$REPO_NAME/$COMMIT_SHA/pipeline.tar.gz  /app/pipeline.tar.gz;
+                python3 /app/experiment_runner.py --pipeline_name $REPO_NAME --pipeline_archive /app/pipeline.tar.gz --experiment_name $REPO_NAME --run_name $SHORT_SHA --pipeline_args $_PIPELINE_ARGS --kfp_namespace $_NAMESPACE']
+  env:
+  - 'CLOUDSDK_COMPUTE_REGION=europe-west1-b'
+  - 'CLOUDSDK_CONTAINER_CLUSTER=kubeflow-oct'
+  id:   'CreatePipelineVersion'
+  waitFor: ['CompilePipeline']
+
+
+#- name: 'gcr.io/$PROJECT_ID/$REPO_NAME/kubectl-util:latest'
+#  entrypoint: '/bin/sh'
+#  args: ['-c', '/builder/kubectl.bash;
+#                gsutil cp gs://$REPO_NAME/$COMMIT_SHA/pipeline.tar.gz  pipeline.tar.gz;
+#                python3 -c "import kfp; client=kfp.Client(); client.upload_pipeline(pipeline_package_path=\"pipeline.tar.gz\", pipeline_name=\"$REPO_NAME\"); client.create_run_from_pipeline_package(arguments=$_PIPELINE_ARGS, run_name=\"$SHORT_SHA\", experiment_name=\"$REPO_NAME\", pipeline_file=\"pipeline.tar.gz\")"']
+#  env:
+#  - 'CLOUDSDK_COMPUTE_REGION=europe-west1-b'
+#  - 'CLOUDSDK_CONTAINER_CLUSTER=kubeflow-oct'
+#  id:   'CreatePipelineVersion'
+#  waitFor: ['CompilePipeline']
+
+
+#- name: 'gcr.io/$PROJECT_ID/$REPO_NAME/kubectl-util:latest'
+#  entrypoint: '/bin/sh'
+#  args: ['-c', '/builder/kubectl.bash;
+#                python3 -c "import kfp; client=kfp.Client(namespace=\"$REPO_NAME\"); exp = client.create_experiment(name=\"$SHORT_SHA\"); client.run_pipeline(exp.id, \"$COMMIT_SHA\", \"/workspace/pipeline.zip\")"']
+#  env:
+#
+#  create_run_from_pipeline_package(pipeline_file=pipeline_filename, arguments={
+#  #    'data-path': 'gs://kubeflow_pipelines_sentiment/data/test.csv',
+#       'vectorizer-gcs-location': 'gs://kubeflow_pipelines_sentiment/assets/x.pkl'}, run_name=None,
+#                                           experiment_name=None)
+#
+#  - 'CLOUDSDK_COMPUTE_REGION=europe-west1-b	'
+#  - 'CLOUDSDK_CONTAINER_CLUSTER=kubeflow-oct'
+#  id:   'RunPipeline'
+#  waitFor: ['CreatePipelineVersion']
+
+
+images:
+  - 'gcr.io/$PROJECT_ID/$REPO_NAME/tfidf-vectoriser'
+  - 'gcr.io/$PROJECT_ID/$REPO_NAME/kubectl-util'
+
+
+
+substitutions:
+  _NAMESPACE: kubeflow
+  _PIPELINE_ID: my-----------
+  _EXPERIMENT_NAME: my-------
+  _REGION: europe-west1
+  _CLUSTER: kubeflow-oct
+  _PIPELINE_ARGS: "'{\"data-path\": \"gs://kubeflow_pipelines_sentiment/data/test.csv\", \"vectorizer-gcs-location\": \"gs://kubeflow_pipelines_sentiment/assets/x.pkl\"}'"
